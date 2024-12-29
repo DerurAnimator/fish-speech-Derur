@@ -1,3 +1,3 @@
 # fish-speech-Derur
 
-This is foek of fishaudio/fish-speech, where I add more funcionatily!
+This is fork of fishaudio/fish-speech, where I add more funcionatily!
