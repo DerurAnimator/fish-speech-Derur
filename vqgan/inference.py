@@ -17,9 +17,7 @@ from tools.file import AUDIO_EXTENSIONS
 OmegaConf.register_new_resolver("eval", eval)
 
 
-def load_model(config_name, checkpoint_path, device="cuda"):
-    global logger_offer
-    
+def load_model(config_name, checkpoint_path, logger_offer, device="cuda"):
     hydra.core.global_hydra.GlobalHydra.instance().clear()
     with initialize(version_base="1.3", config_path="../../fish_speech/configs"):
         cfg = compose(config_name=config_name)
@@ -81,7 +79,7 @@ def load_model(config_name, checkpoint_path, device="cuda"):
 
 
 def main(input_path, output_path, config_name, checkpoint_path, device, batch, temp_audio_path, logger_offer):
-    model = load_model(config_name, checkpoint_path, device=device)
+    model = load_model(config_name, checkpoint_path, logger_offer, device=device)
 
     if (batch == 0) or (batch == "0"):
     #    print("F batch")
