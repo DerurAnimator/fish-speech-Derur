@@ -77,7 +77,7 @@ def load_model(config_name, checkpoint_path, device="cuda"):
     "--temp-audio-path",
     default="temp-combined.wav",
 )
-@click.option("--logger-offer", type=int, default=1) # 0=Off 1=On
+@click.option("--logger-offer", type=int, default=0) # 0=Off 1=On
 
 
 def main(input_path, output_path, config_name, checkpoint_path, device, batch, temp_audio_path, logger_offer):

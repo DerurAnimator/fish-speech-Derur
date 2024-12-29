@@ -1037,7 +1037,7 @@ def launch_thread_safe_queue_agent(
 @click.option("--output-path", type=str, default="./")
 @click.option("--batch", type=int, default=0) # 0=Off 1=On
 @click.option("--batch-mode", type=int, default=1) # 0=Not delete previous file (files in dir like: 1_codes_0.npy, 1_codes_1.npy, 2_codes_0.npy, 2_codes_1.npy) 1=Delete previous file (files in dir like: 1_codes_1.npy, 2_codes_1.npy)
-@click.option("--logger-offer", type=int, default=1) # 0=Off 1=On
+@click.option("--logger-offer", type=int, default=0) # 0=Off 1=On
 
 def main(
     text: str,
