@@ -673,27 +673,31 @@ def encode_tokens(
     return encoded.to(device)
 
 
-def load_model(checkpoint_path, device, precision, compile=False, is_agent=False):
+def load_model(checkpoint_path, device, precision, logger_offer, compile=False, is_agent=False):
     model: Union[NaiveTransformer, DualARTransformer] = BaseTransformer.from_pretrained(
         checkpoint_path, load_weights=True, is_agent=is_agent
     )
 
     model = model.to(device=device, dtype=precision)
-    logger.info(f"Restored model from checkpoint")
+    if logger_offer == 0:
+        logger.info(f"Restored model from checkpoint")
 
     if isinstance(model, DualARTransformer):
         decode_one_token = (
             decode_one_token_ar_agent if is_agent else decode_one_token_ar
         )
-        logger.info("Using DualARTransformer")
+        if logger_offer == 0:
+            logger.info("Using DualARTransformer")
     else:
         decode_one_token = (
             decode_one_token_naive_agent if is_agent else decode_one_token_naive
         )
-        logger.info("Using NaiveTransformer")
+        if logger_offer == 0:
+            logger.info("Using NaiveTransformer")
 
     if compile:
-        logger.info("Compiling function...")
+        if logger_offer == 0:
+            logger.info("Compiling function...")
         decode_one_token = torch.compile(
             decode_one_token,
             fullgraph=True,
@@ -715,6 +719,7 @@ def generate_long(
     *,
     model,
     device: str | torch.device,
+    logger_offer,
     decode_one_token: callable,
     text: str,
     num_samples: int = 1,
@@ -729,6 +734,7 @@ def generate_long(
     prompt_text: Optional[str | list[str]] = None,
     prompt_tokens: Optional[torch.Tensor | list[torch.Tensor]] = None,
 ):
+    
     assert 0 < top_p <= 1, "top_p must be in (0, 1]"
     assert 0 < repetition_penalty < 2, "repetition_penalty must be in (0, 2)"
     assert 0 < temperature < 2, "temperature must be in (0, 2)"
@@ -786,7 +792,8 @@ def generate_long(
                 num_codebooks=model.config.num_codebooks,
             )
         )
-        logger.info(f"Encoded text: {text}")
+        if logger_offer == 0:
+            logger.info(f"Encoded text: {text}")
 
     # Move temperature, top_p, repetition_penalty to device
     # This is important so that changing params doesn't trigger recompile
@@ -804,9 +811,10 @@ def generate_long(
         seg_idx = 0
 
         while seg_idx < len(encoded):
-            logger.info(
-                f"Generating sentence {seg_idx + 1}/{len(encoded)} of sample {sample_idx + 1}/{num_samples}"
-            )
+            if logger_offer == 0:
+                logger.info(
+                    f"Generating sentence {seg_idx + 1}/{len(encoded)} of sample {sample_idx + 1}/{num_samples}"
+                )
 
             seg = encoded[seg_idx]
             global_encoded.append(seg)
@@ -849,7 +857,8 @@ def generate_long(
             )
 
             if sample_idx == 0 and seg_idx == 0 and compile:
-                logger.info(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
+                if logger_offer == 0:
+                    logger.info(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
 
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -858,17 +867,19 @@ def generate_long(
 
             tokens_generated = y.size(1) - prompt_length
             tokens_sec = tokens_generated / t
-            logger.info(
-                f"Generated {tokens_generated} tokens in {t:.02f} seconds, {tokens_sec:.02f} tokens/sec"
-            )
-            logger.info(
-                f"Bandwidth achieved: {model_size * tokens_sec / 1e9:.02f} GB/s"
-            )
+            if logger_offer == 0:
+                logger.info(
+                    f"Generated {tokens_generated} tokens in {t:.02f} seconds, {tokens_sec:.02f} tokens/sec"
+                )
+                logger.info(
+                    f"Bandwidth achieved: {model_size * tokens_sec / 1e9:.02f} GB/s"
+                )
 
             if torch.cuda.is_available():
-                logger.info(
-                    f"GPU Memory used: {torch.cuda.max_memory_reserved() / 1e9:.02f} GB"
-                )
+                if logger_offer == 0:
+                    logger.info(
+                        f"GPU Memory used: {torch.cuda.max_memory_reserved() / 1e9:.02f} GB"
+                    )
 
             # Put the generated tokens
             # since there is <im_end>, we remove last token
@@ -910,7 +921,7 @@ def launch_thread_safe_queue(
 
     def worker():
         model, decode_one_token = load_model(
-            checkpoint_path, device, precision, compile=compile
+            checkpoint_path, device, precision, logger_offer, compile=compile
         )
         with torch.device(device):
             model.setup_caches(
@@ -1002,7 +1013,7 @@ def launch_thread_safe_queue_agent(
 @click.option(
     "--text",
     type=str,
-    default="你说的对, 但是原神是一款由米哈游自主研发的开放世界手游.",
+    default="Hello world!",
 )
 @click.option("--prompt-text", type=str, default=None, multiple=True)
 @click.option(
@@ -1027,6 +1038,11 @@ def launch_thread_safe_queue_agent(
 @click.option("--half/--no-half", default=False)
 @click.option("--iterative-prompt/--no-iterative-prompt", default=True)
 @click.option("--chunk-length", type=int, default=100)
+@click.option("--output-path", type=str, default="./")
+@click.option("--batch", type=int, default=0) # 0=Off 1=On
+@click.option("--batch-mode", type=int, default=1) # 0=Not delete previous file (files in dir like: 1_codes_0.npy, 1_codes_1.npy, 2_codes_0.npy, 2_codes_1.npy) 1=Delete previous file (files in dir like: 1_codes_1.npy, 2_codes_1.npy)
+@click.option("--logger-offer", type=int, default=0) # 0=Off 1=On
+
 def main(
     text: str,
     prompt_text: Optional[list[str]],
@@ -1043,6 +1059,10 @@ def main(
     half: bool,
     iterative_prompt: bool,
     chunk_length: int,
+    output_path: str,
+    batch: int,
+    batch_mode: int,
+    logger_offer: int,
 ) -> None:
 
     precision = torch.half if half else torch.bfloat16
@@ -1051,11 +1071,14 @@ def main(
         raise ValueError(
             f"Number of prompt text ({len(prompt_text)}) and prompt tokens ({len(prompt_tokens)}) should be the same"
         )
-
-    logger.info("Loading model ...")
+    
+  #  print(logger_offer)
+    
+    if logger_offer == 0:
+        logger.info("Loading model ...")
     t0 = time.time()
     model, decode_one_token = load_model(
-        checkpoint_path, device, precision, compile=compile
+        checkpoint_path, device, precision, logger_offer, compile=compile
     )
     with torch.device(device):
         model.setup_caches(
@@ -1065,8 +1088,9 @@ def main(
         )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-
-    logger.info(f"Time to load model: {time.time() - t0:.02f} seconds")
+    
+    if logger_offer == 0:
+        logger.info(f"Time to load model: {time.time() - t0:.02f} seconds")
 
     if prompt_tokens is not None:
         prompt_tokens = [torch.from_numpy(np.load(p)).to(device) for p in prompt_tokens]
@@ -1075,40 +1099,102 @@ def main(
 
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    
+  #  batch_mode = 0 # 0=Not delete previous file (files in dir like: 1_codes_0.npy, 1_codes_1.npy, 2_codes_0.npy, 2_codes_1.npy) 1=Delete previous file (files in dir like: 1_codes_1.npy, 2_codes_1.npy)
+    
+    if (batch == 0) or (batch == "0"):
+        print("F batch")
+        generator = generate_long(
+            model=model,
+            device=device,
+            logger_offer=logger_offer,
+            decode_one_token=decode_one_token,
+            text=text,
+            num_samples=num_samples,
+            max_new_tokens=max_new_tokens,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            temperature=temperature,
+            compile=compile,
+            iterative_prompt=iterative_prompt,
+            chunk_length=chunk_length,
+            prompt_text=prompt_text,
+            prompt_tokens=prompt_tokens,
+        )
 
-    generator = generate_long(
-        model=model,
-        device=device,
-        decode_one_token=decode_one_token,
-        text=text,
-        num_samples=num_samples,
-        max_new_tokens=max_new_tokens,
-        top_p=top_p,
-        repetition_penalty=repetition_penalty,
-        temperature=temperature,
-        compile=compile,
-        iterative_prompt=iterative_prompt,
-        chunk_length=chunk_length,
-        prompt_text=prompt_text,
-        prompt_tokens=prompt_tokens,
-    )
+        idx = 0
+        codes = []
+        
+        if not output_path.endswith("/" or "\\"): output_path = f"{output_path}/"
+        os.makedirs(output_path, exist_ok=True)
+        
+        for response in generator:
+            if response.action == "sample":
+                codes.append(response.codes)
+                if logger_offer == 0:
+                    logger.info(f"Sampled text: {response.text}")
+            elif response.action == "next":
+                if codes:
+                    np.save(f"{output_path}codes_{idx}.npy", torch.cat(codes, dim=1).cpu().numpy())
+                    if logger_offer == 0:
+                        logger.info(f"Saved codes to {output_path}codes_{idx}.npy")
+                if logger_offer == 0:
+                    logger.info(f"Next sample")
+                codes = []
+                idx += 1
+            else:
+                logger.error(f"Error: {response}")
+                
+    elif (batch == 1) or (batch == "1"):
+            print("T batch")
+            texts_list = text.split('|')
+            
+            i = 1
+            for textt in texts_list:
+                generator = generate_long(
+                    model=model,
+                    device=device,
+                    logger_offer=logger_offer,
+                    decode_one_token=decode_one_token,
+                    text=textt,
+                    num_samples=num_samples,
+                    max_new_tokens=max_new_tokens,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    temperature=temperature,
+                    compile=compile,
+                    iterative_prompt=iterative_prompt,
+                    chunk_length=chunk_length,
+                    prompt_text=prompt_text,
+                    prompt_tokens=prompt_tokens,
+                )
 
-    idx = 0
-    codes = []
-
-    for response in generator:
-        if response.action == "sample":
-            codes.append(response.codes)
-            logger.info(f"Sampled text: {response.text}")
-        elif response.action == "next":
-            if codes:
-                np.save(f"codes_{idx}.npy", torch.cat(codes, dim=1).cpu().numpy())
-                logger.info(f"Saved codes to codes_{idx}.npy")
-            logger.info(f"Next sample")
-            codes = []
-            idx += 1
-        else:
-            logger.error(f"Error: {response}")
+                idx = 0
+                codes = []
+                
+                if not output_path.endswith("/" or "\\"): output_path = f"{output_path}/"
+                os.makedirs(output_path, exist_ok=True)
+                
+                for response in generator:
+                    if response.action == "sample":
+                        codes.append(response.codes)
+                        if logger_offer == 0:
+                            logger.info(f"Sampled text: {response.text}")
+                    elif response.action == "next":
+                        if codes:
+                            np.save(f"{output_path}{i}_codes_{idx}.npy", torch.cat(codes, dim=1).cpu().numpy())
+                            if (batch_mode == 1) or (batch_mode == "1"):
+                                if os.path.exists(f"{output_path}{i}_codes_{idx-1}.npy"):
+                                    os.remove(f"{output_path}{i}_codes_{idx-1}.npy")
+                            if logger_offer == 0:
+                                logger.info(f"Saved codes to {output_path}{i}_codes_{idx}.npy")
+                        if logger_offer == 0:
+                            logger.info(f"Next sample")
+                        codes = []
+                        idx += 1
+                    else:
+                        logger.error(f"Error: {response}")
+                i += 1
 
 
 if __name__ == "__main__":
